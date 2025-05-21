@@ -12,8 +12,8 @@ var cacheWithCustomExp = cache.NewCache(1*time.Minute)
 var cacheWithCustomExpAndCleanup = cache.NewCache(60*time.Minute, 48*time.Hour)
 
 func main() {
-    // check for stored string value
-    value, ok := defaultCache.Get("someUniqueKey").(string)
+	// check for stored string value
+	value, ok := defaultCache.Get("someUniqueKey").(string)
 	if !ok {
 		return value, fmt.Errorf("key not found")
 	}
