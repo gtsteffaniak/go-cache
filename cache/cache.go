@@ -1,11 +1,12 @@
 package cache
 
 import (
+	"math/rand"
 	"sync"
 	"time"
 )
 
-func NewCache(settings ...time.Duration) *KeyCache {
+func NewCache[T any](settings ...time.Duration) *KeyCache[T] {
 	expires := 24 * time.Hour // default
 	cleanup := 1 * time.Hour  // default
 	if len(settings) > 0 {
@@ -14,60 +15,60 @@ func NewCache(settings ...time.Duration) *KeyCache {
 	if len(settings) > 1 {
 		cleanup = settings[1]
 	}
-	newCache := KeyCache{
-		data:         make(map[string]cachedValue),
+	newCache := KeyCache[T]{
+		data:         make(map[string]cachedValue[T]),
 		expiresAfter: expires, // default
 	}
-	go newCache.cleanupExpiredJob(cleanup)
+	// Adding jitter for cleanup to prevent all caches from running cleanup at the same time
+	// Generate a random duration between 1 and 2 seconds
+	min := 1 * time.Second
+	max := 2 * time.Second
+	randomDuration := min + time.Duration(rand.Int63n(int64(max-min)))
+	go newCache.cleanupExpiredJob(cleanup + randomDuration)
 	return &newCache
 }
 
-type KeyCache struct {
-	data         map[string]cachedValue
+type KeyCache[T any] struct {
+	data         map[string]cachedValue[T]
 	mu           sync.RWMutex
 	expiresAfter time.Duration
 }
 
-type cachedValue struct {
-	value     interface{}
+type cachedValue[T any] struct {
+	value     T
 	expiresAt time.Time
 }
 
-func (c *KeyCache) Set(key string, value interface{}) {
-	c.mu.Lock()
-	defer c.mu.Unlock()
-	c.data[key] = cachedValue{
-		value:     value,
-		expiresAt: time.Now().Add(c.expiresAfter),
-	}
+func (c *KeyCache[T]) Set(key string, value T) {
+	c.SetWithExp(key, value, c.expiresAfter)
 }
 
-func (c *KeyCache) Delete(key string) {
+func (c *KeyCache[T]) Delete(key string) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	delete(c.data, key)
 }
 
-func (c *KeyCache) SetWithExp(key string, value interface{}, exp time.Duration) {
+func (c *KeyCache[T]) SetWithExp(key string, value T, exp time.Duration) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	c.data[key] = cachedValue{
+	c.data[key] = cachedValue[T]{
 		value:     value,
 		expiresAt: time.Now().Add(exp),
 	}
 }
 
-func (c *KeyCache) Get(key string) interface{} {
+func (c *KeyCache[T]) Get(key string) (T, bool) {
 	c.mu.RLock()
 	defer c.mu.RUnlock()
 	cached, ok := c.data[key]
-	if !ok || time.Now().After(cached.expiresAt) {
-		return nil
+	if ok && time.Now().After(cached.expiresAt) {
+		ok = false
 	}
-	return cached.value
+	return cached.value, ok
 }
 
-func (c *KeyCache) cleanupExpired() {
+func (c *KeyCache[T]) cleanupExpired() {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	now := time.Now()
@@ -79,7 +80,7 @@ func (c *KeyCache) cleanupExpired() {
 }
 
 // should automatically run for all cache types as part of init.
-func (c *KeyCache) cleanupExpiredJob(frequency time.Duration) {
+func (c *KeyCache[T]) cleanupExpiredJob(frequency time.Duration) {
 	ticker := time.NewTicker(frequency)
 	defer ticker.Stop()
 	for range ticker.C {
