@@ -49,6 +49,13 @@ func (c *KeyCache[T]) Delete(key string) {
 	delete(c.data, key)
 }
 
+// ClearAll removes all entries from the cache.
+func (c *KeyCache[T]) ClearAll() {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.data = make(map[string]cachedValue[T])
+}
+
 func (c *KeyCache[T]) SetWithExp(key string, value T, exp time.Duration) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
