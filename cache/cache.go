@@ -6,6 +6,13 @@ import (
 	"time"
 )
 
+// NewCache returns a new typed TTL cache. Caches are intended to be long-lived
+// for the lifetime of the program; use Close when discarding a cache (for example
+// in tests) to stop the background cleanup goroutine.
+//
+// Optional settings: default entry TTL (settings[0], default 24h), background
+// cleanup interval (settings[1], default 1h). A non-positive cleanup interval
+// falls back to the default.
 func NewCache[T any](settings ...time.Duration) *KeyCache[T] {
 	expires := 24 * time.Hour // default
 	cleanup := 1 * time.Hour  // default
@@ -14,10 +21,14 @@ func NewCache[T any](settings ...time.Duration) *KeyCache[T] {
 	}
 	if len(settings) > 1 {
 		cleanup = settings[1]
+		if cleanup <= 0 {
+			cleanup = 1 * time.Hour
+		}
 	}
 	newCache := KeyCache[T]{
 		data:         make(map[string]cachedValue[T]),
-		expiresAfter: expires, // default
+		expiresAfter: expires,
+		stopCleanup:  make(chan struct{}),
 	}
 	// Adding jitter for cleanup to prevent all caches from running cleanup at the same time
 	// Generate a random duration between 1 and 2 seconds
@@ -28,10 +39,15 @@ func NewCache[T any](settings ...time.Duration) *KeyCache[T] {
 	return &newCache
 }
 
+// KeyCache is a string-keyed, generically typed TTL cache safe for concurrent use.
+// Instances are meant to be kept for the process lifetime; call Close when the
+// cache is no longer needed.
 type KeyCache[T any] struct {
 	data         map[string]cachedValue[T]
 	mu           sync.RWMutex
 	expiresAfter time.Duration
+	stopCleanup  chan struct{}
+	closeOnce    sync.Once
 }
 
 type cachedValue[T any] struct {
@@ -69,10 +85,25 @@ func (c *KeyCache[T]) Get(key string) (T, bool) {
 	c.mu.RLock()
 	defer c.mu.RUnlock()
 	cached, ok := c.data[key]
-	if ok && time.Now().After(cached.expiresAt) {
-		ok = false
+	if !ok {
+		var zero T
+		return zero, false
 	}
-	return cached.value, ok
+	if time.Now().After(cached.expiresAt) {
+		var zero T
+		return zero, false
+	}
+	return cached.value, true
+}
+
+// Close stops the background cleanup goroutine and ticker. It is idempotent and
+// safe to call from multiple goroutines. After Close, Get, Set, Delete, and
+// ClearAll remain usable, but expired entries are no longer removed automatically
+// (call Delete, ClearAll, or discard the cache).
+func (c *KeyCache[T]) Close() {
+	c.closeOnce.Do(func() {
+		close(c.stopCleanup)
+	})
 }
 
 func (c *KeyCache[T]) cleanupExpired() {
@@ -86,11 +117,15 @@ func (c *KeyCache[T]) cleanupExpired() {
 	}
 }
 
-// should automatically run for all cache types as part of init.
 func (c *KeyCache[T]) cleanupExpiredJob(frequency time.Duration) {
 	ticker := time.NewTicker(frequency)
 	defer ticker.Stop()
-	for range ticker.C {
-		c.cleanupExpired()
+	for {
+		select {
+		case <-c.stopCleanup:
+			return
+		case <-ticker.C:
+			c.cleanupExpired()
+		}
 	}
 }
