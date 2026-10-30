@@ -49,4 +49,7 @@ func (c *KeyCache[T]) Get(key string) (T, bool)
 
 // Delete a value
 func (c *KeyCache[T]) Delete(key string)
+
+// Stop background cleanup (for tests or discarded caches)
+func (c *KeyCache[T]) Close()
 ```
