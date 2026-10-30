@@ -55,10 +55,12 @@ type cachedValue[T any] struct {
 	expiresAt time.Time
 }
 
+// Set stores value under key using this cache's default TTL.
 func (c *KeyCache[T]) Set(key string, value T) {
 	c.SetWithExp(key, value, c.expiresAfter)
 }
 
+// Delete removes key from the cache.
 func (c *KeyCache[T]) Delete(key string) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
@@ -72,6 +74,7 @@ func (c *KeyCache[T]) ClearAll() {
 	c.data = make(map[string]cachedValue[T])
 }
 
+// SetWithExp stores value under key with a custom TTL.
 func (c *KeyCache[T]) SetWithExp(key string, value T, exp time.Duration) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
@@ -81,6 +84,8 @@ func (c *KeyCache[T]) SetWithExp(key string, value T, exp time.Duration) {
 	}
 }
 
+// Get returns the value for key and whether it is present and unexpired.
+// Missing or expired keys return the zero value and false.
 func (c *KeyCache[T]) Get(key string) (T, bool) {
 	c.mu.RLock()
 	defer c.mu.RUnlock()

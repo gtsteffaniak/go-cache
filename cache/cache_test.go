@@ -12,6 +12,16 @@ func entryCount[T any](c *KeyCache[T]) int {
 	return len(c.data)
 }
 
+func TestGetMissingReturnsZeroValue(t *testing.T) {
+	c := NewCache[int]()
+	defer c.Close()
+
+	got, ok := c.Get("missing")
+	if ok || got != 0 {
+		t.Fatalf("Get(missing) = %d, %v; want 0, false", got, ok)
+	}
+}
+
 func TestGetHitAndMiss(t *testing.T) {
 	c := NewCache[string]()
 	defer c.Close()
